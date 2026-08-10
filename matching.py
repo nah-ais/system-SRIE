@@ -22,11 +22,19 @@ def _combined_string(row: pd.Series) -> str:
     return ' | '.join(parts)
 
 
-def find_internal_duplicates(df: pd.DataFrame, threshold: int = 90, id_col: str = None) -> pd.DataFrame:
+def find_internal_duplicates(df: pd.DataFrame, threshold: int = 90,
+                              event_cols: list = None) -> pd.DataFrame:
     """
     Cari pasangan baris yang mirip (similarity >= threshold) DI DALAM satu dataset.
     Mengembalikan dataframe flag: index_a, index_b, score, field-field pembanding.
-    Baris dengan id_peserta_calc identik dilewati (memang orang yang sama, bukan kandidat duplikat).
+
+    event_cols: kalau diisi (mis. ['judul_kegiatan', 'tanggal_kegiatan']) -> dipakai khusus
+    untuk dataset LOGIN, supaya bisa membedakan:
+      - identitas sama + event sama   -> 'exact_duplicate_submission' (double-submit, WAJIB di-flag)
+      - identitas sama + event beda   -> dilewati (legit, orang sama hadir di kegiatan berbeda)
+      - identitas beda tapi mirip     -> 'possible_typo_duplicate' (seperti sebelumnya)
+    Kalau event_cols=None (dipakai untuk REGISTER), identitas sama selalu dilewati
+    (karena register memang harus unique per orang, tidak ada dimensi event).
     """
     df = df.reset_index(drop=True)
     strings = df.apply(_combined_string, axis=1).tolist()
@@ -34,23 +42,40 @@ def find_internal_duplicates(df: pd.DataFrame, threshold: int = 90, id_col: str 
     flags = []
 
     for i, j in combinations(range(n), 2):
-        # skip kalau id_peserta_calc sudah identik (bukan kasus duplikat, tapi orang sama)
-        if 'id_peserta_calc' in df.columns and df.loc[i, 'id_peserta_calc'] == df.loc[j, 'id_peserta_calc']:
-            continue
-        score = fuzz.token_sort_ratio(strings[i], strings[j])
-        if score >= threshold:
-            flags.append({
-                'index_a': i,
-                'index_b': j,
-                'similarity_score': round(score, 1),
-                'nama_a': df.loc[i, 'nama_display'] if 'nama_display' in df.columns else '',
-                'nama_b': df.loc[j, 'nama_display'] if 'nama_display' in df.columns else '',
-                'tanggal_lahir_a': df.loc[i].get('tanggal_lahir_clean', ''),
-                'tanggal_lahir_b': df.loc[j].get('tanggal_lahir_clean', ''),
-                'kelurahan_a': df.loc[i].get('kelurahan_display', ''),
-                'kelurahan_b': df.loc[j].get('kelurahan_display', ''),
-                'status': 'pending',
-            })
+        same_identity = (
+            'id_peserta_calc' in df.columns
+            and df.loc[i, 'id_peserta_calc'] == df.loc[j, 'id_peserta_calc']
+        )
+
+        if same_identity:
+            if event_cols is None:
+                continue  # register: orang sama, bukan kandidat duplikat untuk direview
+            same_event = all(
+                str(df.loc[i].get(c, '')) == str(df.loc[j].get(c, '')) for c in event_cols
+            )
+            if not same_event:
+                continue  # login: orang sama tapi kegiatan beda -> legit, bukan duplikat
+            flag_type = 'exact_duplicate_submission'
+            score = 100.0
+        else:
+            score = fuzz.token_sort_ratio(strings[i], strings[j])
+            if score < threshold:
+                continue
+            flag_type = 'possible_typo_duplicate'
+
+        flags.append({
+            'index_a': i,
+            'index_b': j,
+            'flag_type': flag_type,
+            'similarity_score': round(score, 1),
+            'nama_a': df.loc[i, 'nama_display'] if 'nama_display' in df.columns else '',
+            'nama_b': df.loc[j, 'nama_display'] if 'nama_display' in df.columns else '',
+            'tanggal_lahir_a': df.loc[i].get('tanggal_lahir_clean', ''),
+            'tanggal_lahir_b': df.loc[j].get('tanggal_lahir_clean', ''),
+            'kelurahan_a': df.loc[i].get('kelurahan_display', ''),
+            'kelurahan_b': df.loc[j].get('kelurahan_display', ''),
+            'status': 'pending',
+        })
 
     return pd.DataFrame(flags)
 
