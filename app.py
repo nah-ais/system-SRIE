@@ -73,7 +73,8 @@ if run_btn:
             dup_register = find_internal_duplicates(df_register, threshold=threshold)
 
         with st.spinner("Mendeteksi duplikat internal login..."):
-            dup_login = find_internal_duplicates(df_login, threshold=threshold)
+            event_cols = [c for c in ['judul_kegiatan', 'tanggal_kegiatan'] if c in df_login.columns]
+            dup_login = find_internal_duplicates(df_login, threshold=threshold, event_cols=event_cols)
 
         with st.spinner("Mencocokkan login <-> register..."):
             df_login, review_match = match_login_to_register(df_login, df_register, fuzzy_threshold=threshold)
@@ -214,6 +215,8 @@ with tab_dup_login:
             if idx_a in st.session_state.dropped_login_idx or idx_b in st.session_state.dropped_login_idx:
                 continue
             with st.container(border=True):
+                badge = "🔁 Double-Submit (event sama)" if r.get('flag_type') == 'exact_duplicate_submission' else "✏️ Mirip/Typo"
+                st.caption(badge)
                 cols = st.columns([3, 3, 2, 3])
                 cols[0].markdown(f"**A:** {r['nama_a']}  \nTTL: {r['tanggal_lahir_a']} | Kel: {r['kelurahan_a']}")
                 cols[1].markdown(f"**B:** {r['nama_b']}  \nTTL: {r['tanggal_lahir_b']} | Kel: {r['kelurahan_b']}")
